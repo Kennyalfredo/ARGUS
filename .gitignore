@@ -1,0 +1,47 @@
+# Drafted reports — contain validity proofs, JWTs, secret material.
+out/
+
+# Engagement-specific data — company scopes, submissions, ownership verdicts, employee data.
+# The framework (agents, commands, skills, scripts) is public; the data is not.
+memory/programs/
+memory/submissions/
+memory/ownership-cache/
+memory/employee-cache/
+memory/lessons/proposals/
+
+# Logs and scratch
+*.log
+.DS_Store
+*.swp
+*.tmp
+*~
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Claude Code per-machine local settings (MCP enablement, allowed permissions).
+.claude/settings.local.json
+
+# Local-only credential storage
+.env
+.env.*
+*.key
+*.pem
+secrets.yml
+secrets.yaml
+
+# Python cruft
+__pycache__/
+*.pyc
+.venv/
+
+# Misc untracked project dirs (engagement work, tooling, external resources)
+.playwright-mcp/
+gowitness.sqlite3
+boot.json
+*.png
+informes/
+_resources/
+crAPI/
+node_modules/
