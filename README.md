@@ -1,128 +1,226 @@
-# bb-agent — offensive-security agent (bug bounty · pentest · cloud)
+# pr-agent
 
-Multi-subagent system for Claude Code. It began as a non-applicative bug-bounty
-discovery pipeline (leaked credentials, exposed cloud assets, subdomain takeover)
-across HackerOne / Bugcrowd / Intigriti programs, and has grown into a broader
-offensive-security agent with **four engagement modes** (see below): bug-bounty
-recon, external-footprint (Huella Digital), active web-vuln testing, and
-**authenticated AWS cloud-configuration audits** — plus a documentation axis
-(Eje 3) that packages findings into HackerOne markdown or YOUR_ORG Typst reports.
+**Autonomous offensive-security agent built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code)**
 
-## Status
+20+ specialized subagents that chain together to run bug-bounty recon, web-application pentesting, cloud-configuration audits, and digital-footprint assessments — then package findings into submission-ready reports. All with a human in the loop: nothing is submitted automatically.
 
-Built incrementally since 2026-05-11:
-1. Tool environment + project scaffold
-2. `/program-load` + `program-scope-parser` (HackerOne/Bugcrowd/Intigriti ingestion)
-3. `bucket-hunter` + `ownership-verifier` (3-check ownership chain with 30-day cache)
-4. `secret-hunter` (trufflehog org-sweep + GH code-search dork + noseyparker history)
-5. `report-drafter` + audit trail (hard-gated on `verdict == owned`)
-6. Learning loop v1: `retro-analyzer` + `/retro` + `memory/rules.json` (machine-readable rules per subagent with deterministic IDs, confidence tiers, and provenance)
+---
 
-## Four engagement modes
+## What it does
 
-**1. Bug-bounty passive recon** (original) — ingest a program (`/program-load`), run the hunts, verify ownership, `/draft-report`. Passive-only; no light-active probing of program infra.
+| Mode | Trigger | What runs |
+|------|---------|-----------|
+| **Bug-bounty recon** | `/program-load <url>` | Ingest a HackerOne/Bugcrowd/Intigriti program, then hunt for leaked secrets, exposed buckets, subdomain takeovers, and sensitive endpoints — all passive |
+| **Web-vuln hunting** | `/webvuln-surface` → `/hunt-*` | Active IDOR/BOLA, XSS, SQLi, SSRF testing via Burp MCP with strict compliance gates and proof ceilings |
+| **Cloud audit** | `/audit-cloud <slug> <profile>` | Authenticated AWS posture scan (Prowler, ScoutSuite, CloudFox, PMapper, IAM analysis) with automated false-positive triage |
+| **Digital footprint** | `/domain <domain>` | External attack-surface assessment: DNS, web portals, IP reputation, breach exposure, employee OSINT |
 
-**2. Huella Digital** (`/domain <domain>`, added 2026-05-27) — client-work-project mode for an **external-attack-surface / digital-footprint** assessment of a single domain. Authorization = bare-domain-is-go. Synthesizes a `engagement_type:"huella_digital"` scope, runs the four hunts **plus `footprint-hunter`** (DNS surface w/ RFC1918 flagging, web-portal inventory + screenshots, IP reputation/RBL, emails/phones/social, **passive** breach listing), then **`huella-reporter`** assembles a Spanish **YOUR_ORG "Informe de Huella Digital"** at `out/<slug>/reports/huella-digital-<ts>.md` scored on a Relevancia×Complejidad severity matrix.
+Every mode flows into one of two reporting channels:
+- **Bug-bounty markdown** → `/draft-report` (HackerOne/Bugcrowd format)
+- **Client Typst deliverable** → `/informe` (compiled PDF, staged for delivery)
 
-Mode-2 boundaries (encoded as scope-rule flags): **light-active** tier ON (httpx homepage probe + 1 screenshot/host + DNSBL) but **credential validation HARD-OFF** (leaked creds listed only, `Estado=DESCONOCIDA`, never login-tested — requires separate written authorization), **heavy-active OFF** (no CVE/exploit), and the **LinkedIn-automation ban** stays (employee data via manual paste → §1.4.3). Breach source is pluggable (HIBP default, dehashed/credshed wireable). See `tools.md` → "Huella Digital mode".
+---
 
-**3. Active web-vuln tier** (`feat/webvuln-tier`, added 2026-06-10) — **applicative** vulnerability hunting that sends real payloads (IDOR/BOLA/BFLA, XSS/SQLi/SSTI, SSRF/XXE, JWT/OAuth/GraphQL/race/biz-logic) via the **Burp MCP**, powered by the global `offensive-*` skills. This is the one tier that actively exploits, so it runs under a dedicated **strict per-program gate** — `.claude/skills/webvuln-compliance/SKILL.md` is the canonical contract every active hunter embeds at Step 0:
-
-- **Hard gate (REFUSE + stop):** `automated_tools_allowed==false`, `explicit_scanner_ban==true`, target not under an in-scope wildcard, or no safe-harbor without an operator go.
-- **Always off:** DoS, brute force, destructive mutations, data exfil beyond proof, attacking real users.
-- **Proof ceiling ("confirm, don't exploit"):** read ONE adjacent IDOR object (never enumerate), `alert(document.domain)`-class XSS, boolean/time SQLi (no dumps), `{{7*7}}` SSTI, OOB-to-Collaborator SSRF/XXE — stop at the ceiling and report the honest lower impact. Mirrors the passive tier's *"detection is the report."*
-- **Decoupled & no-auto-submit** like the rest: hunters → `ownership-verifier` (`in_scope_subdomain_override` auto-fires for in-scope wildcards) → `report-drafter`. `out/` (incl. evidence) is gitignored; live auth tokens live only at `/mnt/files/bb-agent/<slug>/webvuln/auth/context.json` (`0600`, off-repo).
-
-Pipeline: `/auth-load <slug>` (store + validate 1–2 test accounts) → `/webvuln-surface <slug>` (build the testable injection-point inventory from the gau corpus + Burp history + a light authenticated Playwright crawl — **no payloads**) → `/hunt-access <slug>` (IDOR/BOLA/BFLA/mass-assignment, Phase B) → `/verify-ownership` → `/draft-report`. Injection / SSRF-XXE / auth-API hunters land in Phases C–E. **Requires the Burp MCP connected in the `~/bb-agent` session.**
-
-**4. Cloud configuration audit** (`/audit-cloud <slug> <aws-cli-profile>`, added 2026-07-06) — authenticated **AWS cloud-config pentest** for a contracted engagement (credential-gated client work, distinct from the bug-bounty modes). The operator provisions a **read-only** engagement role (e.g. SSO permission set with `SecurityAudit` + `IAMReadOnlyAccess`) and configures an AWS CLI profile; the command confirms identity + the read-only loadout, synthesizes a `engagement_type:"cloud_audit"` scope, and delegates to the **`cloud-auditor`** subagent.
-
-`cloud-auditor` runs the read-only posture suite across all enabled regions — **Prowler** (CIS/PCI/NIST/SOC2, condition-aware), **ScoutSuite**, **CloudFox**, **Cloudsplaining**, **PMapper** (privesc→admin graph, region-restricted), the **IAM credential report**, **IAM Access Analyzer**, and **GuardDuty** — then applies a mandatory **false-positive triage** before writing `out/<slug>/cloud/<ts>/FINDINGS.md`. The triage is the point of the tier: scanners flag raw state, so every finding is verified (policy `Condition` awareness — trust Prowler over ScoutSuite for "public"; SG→live-instance attachment vs orphan SGs; cross-account ExternalId + vendor attribution; RDS `PubliclyAccessible` vs actual SG reachability). Verified in practice to kill ~44 S3 + ~71 SNS + ~43 SG false positives per account.
-
-Mode-4 boundaries: **read-only, proof ceiling** ("confirm, don't exploit" — no writes, no privesc *execution*, no port scans, no `GetObject`, no secret-value reads, no cross-account `AssumeRole`). SSO STS tokens expire ~hourly → the tier pauses and requests a refresh, never proceeding on a dead token. **pacu** + **enumerate-iam** are installed but deliberately NOT wired (write/exploitation is out of scope for the read-only role; enumerate-iam is redundant when `SecurityAudit` can read policies). Deliverable = YOUR_ORG Typst via `/informe <slug> tecnico`. See `tools.md` → "Cloud pentest tooling" and the standing lesson in `memory/feedback_cloud_scanner_fp_triage.md`.
-
-## Documentation axis (Eje 3)
-
-Independent of *which* mode discovers the findings, two reporting channels package them for delivery (neither auto-submits):
-
-- **Bug-bounty markdown** — `/draft-report <slug> [asset]` → `report-drafter` (HackerOne/Bugcrowd, hard-gated on `ownership == owned`).
-- **YOUR_ORG Typst** — `/informe <slug> <tecnico|ejecutivo|huella>` → `typst-reporter` (client/owner deliverable authored in Typst with `@local/plantilla-report`, compiled clean, staged for typst.app). This is the channel for contracted pentest + cloud-audit + Huella deliverables.
-
-## Directory layout
+## Architecture
 
 ```
-bb-agent/
-├── README.md             — this file
-├── tools.md              — binary inventory (full paths, versions, compliance rules)
-├── .claude/
-│   ├── agents/           — subagent definitions (.md files with frontmatter)
-│   ├── commands/         — slash commands (e.g., /program-load, /tier3-hunt)
-│   └── skills/           — reusable knowledge (e.g., tier3-rules)
-├── memory/
-│   ├── programs/         — per-program scope JSON (<slug>.json)
-│   └── ownership-cache/  — ownership-verification cache (positive + negative)
-└── out/                  — scan outputs, drafted reports
+                    ┌─────────────────────────────────────────┐
+                    │             ORCHESTRATOR                │
+                    │  /program-load  /route  /stats          │
+                    └──────────┬──────────────┬───────────────┘
+                               │              │
+              ┌────────────────┼──────────────┼────────────────┐
+              │                │              │                │
+     ┌────────▼──────┐ ┌──────▼───────┐ ┌────▼─────┐ ┌───────▼───────┐
+     │ secret-hunter │ │bucket-hunter │ │ takeover │ │endpoint-hunter│
+     │  trufflehog   │ │  s3scanner   │ │  hunter  │ │  gau+waymore  │
+     │  noseyparker  │ │  cloud_enum  │ │ subfinder│ │  nuclei/httpx │
+     │  gh-codesearch│ │              │ │   subzy  │ │               │
+     └───────┬───────┘ └──────┬───────┘ └────┬─────┘ └───────┬───────┘
+             │                │              │                │
+             └────────────────┼──────────────┼────────────────┘
+                              │              │
+                    ┌─────────▼──────────────▼─────────┐
+                    │      ownership-verifier           │
+                    │  3-check chain: GH + Wayback + DNS│
+                    │  positive-proof model for buckets │
+                    └──────────────┬────────────────────┘
+                                   │
+                    ┌──────────────▼────────────────────┐
+                    │        report-drafter              │
+                    │  hard-gated on verdict == owned    │
+                    │  severity caps · no-inflation rule │
+                    └──────────────┬────────────────────┘
+                                   │
+                    ┌──────────────▼────────────────────┐
+                    │     HUMAN REVIEW & SUBMIT         │
+                    │     (nothing is auto-submitted)    │
+                    └──────────────────────────────────┘
+
+     ┌──────────────────────────────────────────────────────┐
+     │              ACTIVE WEB-VULN TIER                    │
+     │  webvuln-surface → access-control-hunter (IDOR)      │
+     │                  → xss-hunter · sqli-hunter          │
+     │                  → ssrf-hunter                       │
+     │  All via Burp MCP · strict compliance gate (§1)      │
+     │  Proof ceiling: confirm, don't exploit               │
+     └──────────────────────────────────────────────────────┘
 ```
 
-Note: bbot scan output goes to `/mnt/files/bb-agent/` (off-root partition),
-NOT here. This dir is only for agent state + reports.
+---
 
-## Key architectural decisions
+## Subagents
 
-1. **Many small subagents, not one big one.** Each has restricted tools.
-2. **Ownership verifier is mandatory before drafting.** Without it, squatter-owned buckets with brand-plausible names get drafted.
-3. **One non-destructive validation call per finding source.** Tracked in state.
-4. **No auto-submit.** Reports go to `out/<program>/reports/*.md`. Human submits.
-5. **Per-program rule parsing.** Each program's restrictions become machine-readable
-   flags that downstream subagents respect.
+| Agent | Purpose | Tools |
+|-------|---------|-------|
+| `program-scope-parser` | Ingest program scope from H1/BC/Intigriti | WebFetch, Bash |
+| `program-scout` | Find high-yield programs to target | WebFetch, Bash |
+| `secret-hunter` | Leaked credentials (trufflehog + noseyparker + GH codesearch) | Bash |
+| `bucket-hunter` | Cloud storage enumeration (S3/GCS/Azure, listing-only) | Bash |
+| `takeover-hunter` | Subdomain takeover candidates (subfinder + subzy) | Bash |
+| `endpoint-hunter` | Sensitive endpoints (gau + waymore + httpx + nuclei) | Bash |
+| `ownership-verifier` | 3-check ownership chain before any report is drafted | Bash |
+| `report-drafter` | Bug-bounty markdown (H1/BC format) | Read, Write |
+| `access-control-hunter` | IDOR / BOLA / BFLA / mass-assignment | Burp MCP |
+| `xss-hunter` | Reflected / stored / DOM XSS | Burp + Playwright |
+| `sqli-hunter` | Boolean, time-based, error-based SQLi | Burp MCP |
+| `ssrf-hunter` | OOB callbacks, metadata, protocol handlers | Burp MCP |
+| `webvuln-surface` | Build testable injection-point inventory | Burp + Playwright |
+| `auth-context` | Credential custody for authenticated testing | Burp MCP |
+| `footprint-hunter` | Digital-footprint OSINT (DNS, portals, reputation) | Bash |
+| `cloud-auditor` | AWS posture (Prowler + ScoutSuite + CloudFox + PMapper) | Bash |
+| `retro-analyzer` | Post-engagement retrospective → rules + lessons | Read, Write |
+| `typst-reporter` | Typst report authoring engine | Read, Write, Bash |
+| `huella-reporter` | Spanish digital-footprint report assembly | Read, Write |
 
-## Learning loop & metrics (added 2026-06-07)
+---
 
-The pipeline's biggest blind spot was that it learned only from its own pre-submission
-self-judgment — `platform_outcome` was `null` on every submission, so triager verdicts
-never fed back. The first four ingested dispositions (N/A, duplicate/low-impact ×2,
-accepted-but-duplicate) corrected more rules than a month
-of self-graded retros. Tooling that closes and measures that loop:
+## Slash commands
 
-- **`/stats`** (`scripts/bb_stats.py`) — funnel, per-engine yield, disposition tally,
-  ownership verdicts, and rule-base health (filter:discovery ratio, confidence tiers,
-  ground-truth-validated count). Read-only.
-- **`/outcome <slug> <report-id|asset>`** (`scripts/bb_outcome.py`) — records a triager
-  verdict into the audit trail, then fires a focused single-finding retro. This is the
-  **one sanctioned path to a `high`-confidence rule** — disposition-grounded, not
-  self-judged.
-- **`/dup-check <slug> <asset>`** (`scripts/bb_duprisk.py`) — pre-submission
-  duplicate-likelihood tier (3 of the first 4 dispositions were duplicates). Advisory;
-  never hard-blocks. Wired into the `/draft-report` hand-off.
-- **`scripts/bb_rule_audit.py`** — standing rule-base hygiene: flags self-judged-`high`
-  rules (must carry a `grounding` field), missing provenance, dup IDs, stale refs to
-  disabled rules, and filter:discovery drift.
-- **`/route <slug>`** (`scripts/bb_route.py`) — pre-hunt engine-routing plan. Reads the
-  target profile (GH org, wildcard count, web assets, caps) + actual historical per-engine
-  yield and recommends RUN / DEPRIORITIZE / SKIP per hunt. Advisory; attacks the
-  clean-negative streak by not spending budget on engines that don't pay off on a given
-  target class (e.g. secret-hunter SKIP when there's no GH org; takeover-hunter SKIP on
-  narrow scope / scanner ban). The prior sharpens as `/outcome` records more dispositions.
+```
+/program-load <url>          Ingest a bug-bounty program
+/find-programs               Scout high-yield programs
+/route <slug>                Engine-routing recommendation
 
-Rule confidence convention: `low`/`medium` are self-judged; `high` requires a `grounding`
-field (`platform_disposition:<id>` or `user_policy`). Falsified rules are disabled
-(`enabled:false` + `disabled_reason`), not deleted.
+/hunt-secrets <slug>         Leaked credential hunt
+/hunt-buckets <slug>         Cloud bucket enumeration
+/hunt-takeovers <slug>       Subdomain takeover scan
+/hunt-endpoints <slug>       Sensitive endpoint discovery
 
-## Running anything
+/auth-load <slug>            Store test-account credentials
+/webvuln-surface <slug>      Build injection-point inventory
+/hunt-access <slug>          IDOR/BOLA/BFLA hunting
+/hunt-xss <slug>             Cross-site scripting
+/hunt-sqli <slug>            SQL injection
+/hunt-ssrf <slug>            Server-side request forgery
 
-To use the agent from Claude Code:
+/verify-ownership <asset>    Ownership verification
+/draft-report <slug>         Bug-bounty report
+/informe <slug> <type>       Typst client deliverable
+/domain <domain>             Digital-footprint assessment
+/audit-cloud <slug> <prof>   AWS cloud audit
+
+/retro <slug>                Post-engagement retrospective
+/outcome <slug> <id>         Record triager disposition
+/dup-check <slug> <asset>    Duplicate-risk assessment
+/stats                       Pipeline metrics & funnel
+/coverage-checklist <slug>   Internal-pentest checklist
+```
+
+---
+
+## Learning loop
+
+The agent learns from every engagement through a structured feedback loop:
+
+1. **Hunt** → subagents produce candidates
+2. **Verify** → ownership-verifier applies the 3-check chain
+3. **Draft** → report-drafter applies severity caps and inflation guards
+4. **Submit** → human reviews and submits
+5. **Outcome** → `/outcome` records the triager's verdict
+6. **Retro** → `/retro` proposes new rules grounded in what actually happened
+7. **Apply** → rules land in `memory/rules.json` with provenance and confidence tiers
+
+Rules have three confidence levels:
+- **low/medium** — self-judged from engagement analysis
+- **high** — grounded in external truth (triager verdict or explicit operator policy)
+
+Falsified rules are disabled with a reason, not deleted — they serve as cautionary records.
+
+The current rule base contains **60+ learned rules** across all subagents, distilled from 30+ engagements.
+
+---
+
+## Safety & compliance
+
+Every active hunter embeds a strict compliance gate at Step 0:
+
+- **Hard gate:** refuses if automated tools are banned, scanner ban is set, target is out of scope, or no safe-harbor exists
+- **Always off:** DoS, brute force, destructive mutations, data exfiltration beyond proof, attacking real users
+- **Proof ceiling:** confirm the vulnerability exists, then stop
+  - IDOR: read ONE adjacent object (never enumerate)
+  - XSS: `alert(document.domain)` in your own session only
+  - SQLi: boolean-diff or time-delay (never dump tables)
+  - SSRF: OOB callback proof (never extract credentials)
+- **No auto-submit:** every report requires human review before submission
+- **Credentials off-repo:** auth tokens stored at `/mnt/files/` with `chmod 0600`, never in git
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
+- For passive recon: `trufflehog`, `noseyparker`, `s3scanner`, `subfinder`, `subzy`, `gau`, `httpx`, `nuclei` (see `tools.md` for full inventory)
+- For active web-vuln: [Burp Suite](https://portswigger.net/burp) with the [Burp MCP extension](https://github.com/PortSwigger/burp-mcp)
+- For cloud audits: `prowler`, `scoutsuite`, `cloudfox`, `pmapper`, `cloudsplaining`
+
+### Setup
 
 ```bash
-cd ~/bb-agent
+git clone https://github.com/Kennyalfredo/pr-agent.git
+cd pr-agent
 claude
 ```
 
-Then invoke slash commands like `/program-load <h1-url>` once they're built.
+Then start with:
+```
+/program-load https://hackerone.com/your-target
+/route your-target
+/hunt-secrets your-target
+```
 
-## Compliance rules (read tools.md for full list)
+### Customization
 
-- No active mass scanning
-- One validation call per source
-- No bucket file downloads
-- Verify ownership BEFORE drafting report
-- 0-day age gate (≥30 days since publication)
+- **Agents** live in `.claude/agents/` — each is a Markdown file with YAML frontmatter (name, tools, model) and a system prompt body
+- **Commands** live in `.claude/commands/` — slash commands that orchestrate the agents
+- **Rules** accumulate in `memory/rules.json` — the agent's learned behavior from past engagements
+- **Lessons** are summarized in `memory/lessons.md` — methodology insights in plain English
+- Replace `YOUR_ORG` references with your organization name for branded report output
+
+---
+
+## Project structure
+
+```
+pr-agent/
+├── .claude/
+│   ├── agents/            19 subagent definitions
+│   ├── commands/          15 slash commands
+│   ├── skills/            Compliance gate (webvuln-compliance)
+│   ├── hooks/             Coverage gate hook
+│   └── settings.json      Project settings
+├── memory/
+│   ├── rules.json         60+ learned rules (anonymized)
+│   └── lessons.md         Methodology lessons
+├── scripts/               Routing, stats, dedup, outcome tracking
+├── tools.md               Binary inventory & versions
+└── README.md
+```
+
+---
+
+## License
+
+This project is provided as-is for educational and authorized security testing purposes. Use responsibly and only against systems you have explicit permission to test.
