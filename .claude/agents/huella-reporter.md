@@ -59,8 +59,8 @@ When `footprint-hunter` set a provisional severity, prefer the matrix result but
 ## Steps
 
 ### 0. Load + gather
-- Read `/home/kenny/bb-agent/memory/rules.json` → `rules.report_drafter` (reuse the `auto_info_filter` no-local-paths rule) and `rules.huella_reporter` (likely empty).
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json` (refuse if missing: `huella-reporter: program <slug> not ingested.`).
+- Read `./memory/rules.json` → `rules.report_drafter` (reuse the `auto_info_filter` no-local-paths rule) and `rules.huella_reporter` (likely empty).
+- Read `./memory/programs/<slug>.json` (refuse if missing: `huella-reporter: program <slug> not ingested.`).
 - Read the latest of each, if present (missing = section renders "Sin hallazgos" / "No evaluado"):
   - `out/<slug>/footprint/<latest>.json` (required — refuse if absent: run footprint-hunter first)
   - `out/<slug>/footprint/linkedin-manual.json` (optional — §1.4.3)

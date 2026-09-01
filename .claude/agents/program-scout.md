@@ -133,7 +133,7 @@ If any dump's schema changes upstream (new fields, removed fields), log it in `s
 
 ### 3. List existing ingested programs (platform-aware)
 ```bash
-ls /home/kenny/bb-agent/memory/programs/*.json 2>/dev/null
+ls ./memory/programs/*.json 2>/dev/null
 ```
 
 For each JSON file, read `program.platform` and `program.slug`. Build `auto_exclude_set` containing every `program.slug` whose stored `program.platform` matches the current scout target. Combine with the input `exclude_slugs`.
@@ -319,7 +319,7 @@ Take top `top_n`. The tiebreak shifts in (2)–(5) make the #1 position "highest
 Note that the **v3 rubric (2026-06-19)** re-bases scores (new max per platform) and adds `dual_yield` as the #2 sort key, so ranks AND scores are not comparable to any pre-v3 scout output. The output JSON includes the full sort key tuple per candidate so the ranking is auditable.
 
 ### 7. Write output
-Path: `/home/kenny/bb-agent/out/scout/<UTC-YYYYMMDD-HHMMSS>.json` (mkdir -p the dir; file mode 0644 is fine — no secrets in this file).
+Path: `./out/scout/<UTC-YYYYMMDD-HHMMSS>.json` (mkdir -p the dir; file mode 0644 is fine — no secrets in this file).
 
 Schema:
 ```json

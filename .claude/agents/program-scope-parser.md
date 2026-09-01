@@ -13,7 +13,7 @@ A single URL pointing to a HackerOne, Bugcrowd, or Intigriti public program page
 ## Job
 Fetch the page, extract scope + rules, produce machine-readable JSON, and write it to:
 
-`/home/kenny/bb-agent/memory/programs/<slug>.json`
+`./memory/programs/<slug>.json`
 
 …where `<slug>` is derived from the URL (see "URL → slug" below).
 
@@ -164,7 +164,7 @@ Whenever you defaulted (rather than read it explicitly from the policy), add a s
 
    Bucket listing or any program-asset fetch is still forbidden. The dump is the same passive source `program-scout` uses.
 6. **Parse into the schema above.** Conservative defaults on ambiguity.
-7. **Write the JSON** to `/home/kenny/bb-agent/memory/programs/<slug>.json` (2-space indent, pretty-printed). `<slug>` is the prefixed form for Bugcrowd (`bc-<engagement-slug>`) and Intigriti (`int-<handle>`), and the bare handle for HackerOne. Use the Write tool.
+7. **Write the JSON** to `./memory/programs/<slug>.json` (2-space indent, pretty-printed). `<slug>` is the prefixed form for Bugcrowd (`bc-<engagement-slug>`) and Intigriti (`int-<handle>`), and the bare handle for HackerOne. Use the Write tool.
 8. **Report back** with: slug (with platform prefix if applicable), file path, in-scope count, out-of-scope count, tier (bug_bounty / vdp / unknown), platform, and a bullet list of any rules that were set by safe-default with the reason. For Bugcrowd, also surface: "All per-target `severity_cap` values defaulted to `unknown` — read the engagement's Rewards tab before drafting medium/low severity reports." For Intigriti, surface: "Per-target `severity_cap` mapped from Tier 1/2/3 to critical/high/medium; `No Bounty` assets capped at `info` (VDP-only within bounty program — won't pay) — confirm before drafting."
 
 ## Don'ts

@@ -28,21 +28,21 @@ This is the **final gate** before a human submits a bug. Your job is to refuse d
 ## Steps
 
 ### 0. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with schema defaults if missing). Extract `rules.report_drafter`. Apply at these points:
+Read `./memory/rules.json` (create with schema defaults if missing). Extract `rules.report_drafter`. Apply at these points:
 - `auto_info_filter[]` — in step 3d (severity computation), after computing the proposed severity, check each rule. If `rule.condition` evaluates true against the candidate record (use a simple boolean expression evaluator — `list_bucket==true AND no_public_read AND object_count==0`, etc.), apply `rule.action`: `skip` means refuse to draft (print the rule's reason); `cap_info` means cap severity at `info` regardless of `scope.in_scope[*].severity_cap`.
 - `severity_overrides[]` — per-detector or per-finding-class severity caps that override the class-default before the `min(proposed, cap)` calc.
 Record rule firings in the output report's HTML comment header (`<!-- applied rule <rule_id>: <reason> -->`) AND in the audit-trail entry's `notes` field.
 
 ### 1. Validate inputs
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing → refuse with "program <slug> not ingested — run /program-load first."
+- Read `./memory/programs/<slug>.json`. If missing → refuse with "program <slug> not ingested — run /program-load first."
 - Note `bounty.tier`, `rules.submission_form`, `rules.requires_ownership_proof` (should be true; if false, still apply the hard rule — our compliance trumps the program's permissiveness).
 
 ### 2. If `asset` is omitted → list-and-prompt mode
 
 Walk these inputs:
-- `/home/kenny/bb-agent/out/<slug>/buckets/*.json` (latest by mtime)
-- `/home/kenny/bb-agent/out/<slug>/secrets/*.json` (latest by mtime)
-- `/home/kenny/bb-agent/out/<slug>/takeovers/*.json` (latest by mtime)
+- `./out/<slug>/buckets/*.json` (latest by mtime)
+- `./out/<slug>/secrets/*.json` (latest by mtime)
+- `./out/<slug>/takeovers/*.json` (latest by mtime)
 
 For each candidate in each file, derive the **verifiable asset** key:
 - Bucket candidate (`source: "s3scanner"` or `"cloud_enum"`) → `asset = candidate.name`.
@@ -86,9 +86,9 @@ End with: `Reply '/draft-report <slug> <asset>' to draft a specific one.`
 
 #### 3a. Ownership gate
 - Compute `key = sha1("<slug>:<asset>")[:16]` (first 16 hex chars; matches ownership-verifier's convention — `echo -n "<slug>:<asset>" | sha1sum | cut -c1-16`).
-- Read `/home/kenny/bb-agent/memory/ownership-cache/<key>.json`.
+- Read `./memory/ownership-cache/<key>.json`.
 - If missing → refuse: `"No ownership verdict for <slug>:<asset>. Run /verify-ownership <slug> <asset> first."`
-- If `verdict != "owned"` → refuse: `"Ownership verdict is '<verdict>' (not 'owned'). Cannot draft. See /home/kenny/bb-agent/memory/ownership-cache/<key>.json for evidence. Run /verify-ownership <slug> <asset> to re-evaluate."`
+- If `verdict != "owned"` → refuse: `"Ownership verdict is '<verdict>' (not 'owned'). Cannot draft. See ./memory/ownership-cache/<key>.json for evidence. Run /verify-ownership <slug> <asset> to re-evaluate."`
 - If `fetched_at` is >30 days old → refuse: `"Ownership verdict stale (fetched <date>). Re-run /verify-ownership <slug> <asset> to refresh."`
 
 #### 3b. Duplicate-draft check
@@ -102,7 +102,7 @@ End with: `Reply '/draft-report <slug> <asset>' to draft a specific one.`
 - For a bucket asset: open the latest `out/<slug>/buckets/*.json`, find the candidate where `name == <asset>`. If multiple matches, pick the most recent file by mtime.
 - For a secret asset (GH owner): open the latest `out/<slug>/secrets/*.json`, find ALL candidates where `repo_owner == <asset>`. There may be several (one report bundles all secrets from one owner).
 - For a takeover asset: open the latest `out/<slug>/takeovers/*.json`, find the candidate where `subdomain == <asset>`. Exactly one match expected.
-- If no candidate record exists for this asset → refuse: `"No scan output found for <asset> under /home/kenny/bb-agent/out/<slug>/. Run /hunt-buckets, /hunt-secrets, or /hunt-takeovers <slug> first."`
+- If no candidate record exists for this asset → refuse: `"No scan output found for <asset> under ./out/<slug>/. Run /hunt-buckets, /hunt-secrets, or /hunt-takeovers <slug> first."`
 
 #### 3d. Severity computation
 - Find the parent wildcard/domain in `scope.in_scope[]` that the asset belongs to (best-match by suffix). For a bucket whose name maps to a base domain in scope, use that domain's `severity_cap`. For a secret in a GH owner that maps to the program org, use the most permissive in-scope `severity_cap` (usually `critical` for Tier 1). For a takeover subdomain, use the `severity_cap` of the matched in-scope wildcard.
@@ -119,7 +119,7 @@ End with: `Reply '/draft-report <slug> <asset>' to draft a specific one.`
 
 #### 3e. Render markdown
 Use the template that matches the finding type. Write to:
-`/home/kenny/bb-agent/out/<slug>/reports/<asset-slug>-<UTC-YYYYMMDD-HHMMSS>.md`
+`./out/<slug>/reports/<asset-slug>-<UTC-YYYYMMDD-HHMMSS>.md`
 (`<asset-slug>` = lowercase, non-alnum → `-`, collapse repeats; create parent dirs.)
 
 Markdown structure (both templates share the header; body differs):

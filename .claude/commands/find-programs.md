@@ -48,7 +48,7 @@ Delegate to the `program-scout` subagent. Pass the **built JSON object** as the 
    - H1: `osint:has_source_code (+4)`, `surface:has_wildcard (+2)`, surface url-domain tiers (≥10/≥30), surface in-scope tiers (≥50/≥200), `web:has_api (+1)`, `triage:managed (+1)`, `triage:resp_eff>=90 (+1)`, `dual_yield (+2)`. Max score 15.
    - Bugcrowd: `surface:has_wildcard (+2)`, surface tiers, `web:has_api (+2)`, `triage:managed (+1)`, `triage:safe_harbor_full (+1)`, `quality:max_payout` tiers (≥5K/≥10K), `dual_yield (+2)`. Max score 14. **No `osint:has_source_code` — Bugcrowd dump doesn't expose repos.**
    - Intigriti: `value:has_tier1 (+3)`, `surface:has_wildcard (+2)`, surface tiers, `quality:max_payout_usd` tiers (≥5K/≥10K), `dual_yield (+2)`. Max score 13. **No source-code signal and no triage-health field in the dump.**
-6. Rank by `score` desc → `dual_yield` desc → `wildcard_count` desc → `url_domain_count` desc → `in_scope_count` asc (inverted: smaller = less picked-over; never reward raw size) → slug. Write top N to `/home/kenny/bb-agent/out/scout/<UTC-ts>.json`.
+6. Rank by `score` desc → `dual_yield` desc → `wildcard_count` desc → `url_domain_count` desc → `in_scope_count` asc (inverted: smaller = less picked-over; never reward raw size) → slug. Write top N to `./out/scout/<UTC-ts>.json`.
 
 When the subagent returns, give the user a tight summary:
 - output file path

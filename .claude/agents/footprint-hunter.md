@@ -38,8 +38,8 @@ Collect the footprint data, classify each item with a **provisional severity** (
 ## Steps
 
 ### 0. Load rules + validate input
-- Read `/home/kenny/bb-agent/memory/rules.json`; extract `rules.footprint_hunter` (likely empty in v1). Apply any `email_skip[]`, `subdomain_skip[]`, `social_handle_skip[]` filters; record firings in `summary.notes`.
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing → stop: `footprint-hunter: program <slug> not ingested — /domain synthesizes the scope first.`
+- Read `./memory/rules.json`; extract `rules.footprint_hunter` (likely empty in v1). Apply any `email_skip[]`, `subdomain_skip[]`, `social_handle_skip[]` filters; record firings in `summary.notes`.
+- Read `./memory/programs/<slug>.json`. If missing → stop: `footprint-hunter: program <slug> not ingested — /domain synthesizes the scope first.`
 - Confirm `engagement_type == "huella_digital"`. If not, warn in notes but proceed.
 - Read the gate flags from rule 1. Compute `light_active` (bool), `do_screenshots` (bool), and `social_enum` (bool, default `true`).
 - Derive `apex` = the registrable domain from `scope.in_scope[]` (the `domain`-type entry). Derive seed list = apex + any explicit in-scope domains.
@@ -47,24 +47,24 @@ Collect the footprint data, classify each item with a **provisional severity** (
 ### 1. Pre-flight
 ```bash
 TS=$(date -u +%Y%m%d-%H%M%S)
-mkdir -p "/home/kenny/bb-agent/out/<slug>/footprint"
+mkdir -p "./out/<slug>/footprint"
 EVID="/mnt/files/bb-agent/<slug>/footprint/$TS"
 mkdir -p "$EVID/screenshots"; chmod -R 700 "/mnt/files/bb-agent/<slug>/footprint/$TS"
 ```
-Confirm tool paths exist (skip gracefully + note if a tool is missing): `/home/kenny/go/bin/subfinder`, `/home/kenny/.local/bin/amass`, `/home/kenny/go/bin/dnsx`, `/home/kenny/go/bin/httpx`, `~/.bbot/tools/gowitness`, `/home/kenny/.local/bin/theHarvester-h`, `/home/kenny/.local/bin/bbot`, `/home/kenny/.local/bin/maigret`, `/home/kenny/.local/bin/waymore` (optional — archive-derived hostnames in §DNS surface; skip if absent), `dig`, `curl`, `jq`.
+Confirm tool paths exist (skip gracefully + note if a tool is missing): `$GOPATH/bin/subfinder`, `~/.local/bin/amass`, `$GOPATH/bin/dnsx`, `$GOPATH/bin/httpx`, `~/.bbot/tools/gowitness`, `~/.local/bin/theHarvester-h`, `~/.local/bin/bbot`, `~/.local/bin/maigret`, `~/.local/bin/waymore` (optional — archive-derived hostnames in §DNS surface; skip if absent), `dig`, `curl`, `jq`.
 
 ### 2. §DNS surface — subdomain enumeration + IP resolution + RFC1918 flag
 Prefer to **reuse the takeover-hunter output** if present (`out/<slug>/takeovers/<latest>.json`) to avoid duplicate enumeration; otherwise enumerate fresh:
 ```bash
-/home/kenny/go/bin/subfinder -d <apex> -all -silent           > "$EVID/subs.txt" 2>/dev/null
-/home/kenny/.local/bin/amass enum -passive -d <apex> -silent >> "$EVID/subs.txt" 2>/dev/null
+$GOPATH/bin/subfinder -d <apex> -all -silent           > "$EVID/subs.txt" 2>/dev/null
+~/.local/bin/amass enum -passive -d <apex> -silent >> "$EVID/subs.txt" 2>/dev/null
 curl -s --max-time 30 "https://crt.sh/?q=%25.<apex>&output=json" | jq -r '.[]?.name_value' 2>/dev/null | sed 's/^\*\.//' >> "$EVID/subs.txt"
 sort -u "$EVID/subs.txt" -o "$EVID/subs.txt"
 ```
-**Archive-derived hostnames via waymore (optional — widens DNS surface).** Archived URLs often reference subdomains that passive DNS sources miss. If `/home/kenny/.local/bin/waymore` is present, run it bounded and extract in-scope hostnames from the URL output, then fold into `subs.txt`. Skip silently if the binary is absent or the run stalls (gau/subfinder/amass/crt.sh coverage stands either way):
+**Archive-derived hostnames via waymore (optional — widens DNS surface).** Archived URLs often reference subdomains that passive DNS sources miss. If `~/.local/bin/waymore` is present, run it bounded and extract in-scope hostnames from the URL output, then fold into `subs.txt`. Skip silently if the binary is absent or the run stalls (gau/subfinder/amass/crt.sh coverage stands either way):
 ```bash
 # BOUNDING FLAGS MANDATORY (unbounded waymore hangs on CommonCrawl); timeout is a hard backstop.
-timeout 300 /home/kenny/.local/bin/waymore -i <apex> -mode U -f -lcc 3 -t 20 -p 4 -r 1 \
+timeout 300 ~/.local/bin/waymore -i <apex> -mode U -f -lcc 3 -t 20 -p 4 -r 1 \
   -oU "$EVID/waymore-<apex>.txt" 2>/dev/null
 # extract hostnames under the apex, append, re-dedupe
 grep -oiE 'https?://[a-z0-9._-]+\.<apex>' "$EVID/waymore-<apex>.txt" 2>/dev/null \
@@ -74,7 +74,7 @@ sort -u "$EVID/subs.txt" -o "$EVID/subs.txt"
 > Note: known to hang on the Wayback CDX query in some sandboxed environments (gau works there but waymore stalls). The `timeout` guard makes this safe — a stall costs nothing, the other three sources already populated `subs.txt`. Re-validate waymore in the live runtime; see tools.md.
 Resolve A/AAAA records (dnsx hangs on `-l <file>` — pipe via stdin):
 ```bash
-cat "$EVID/subs.txt" | /home/kenny/go/bin/dnsx -a -aaaa -resp -silent -json > "$EVID/dns.jsonl" 2>/dev/null
+cat "$EVID/subs.txt" | $GOPATH/bin/dnsx -a -aaaa -resp -silent -json > "$EVID/dns.jsonl" 2>/dev/null
 ```
 For each resolved host, build `{subdomain, ips[], private_ip, severity}`:
 - `private_ip = true` if ANY A record is RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) or CGNAT (`100.64.0.0/10`) or loopback/link-local. Private IP exposed via public DNS → provisional severity `Alta` (information disclosure of internal topology — mirror the reference report's `sisdon`→`10.128.40.99` finding).
@@ -87,7 +87,7 @@ If `light_active == false`: mark every host `live_status: "unprobed"`, skip to S
 Otherwise probe the resolved hosts (one pass; homepage only):
 ```bash
 cut -d' ' -f1 "$EVID/subs.txt" | sort -u > "$EVID/hosts.txt"
-/home/kenny/go/bin/httpx -l "$EVID/hosts.txt" -silent -json \
+$GOPATH/bin/httpx -l "$EVID/hosts.txt" -silent -json \
   -status-code -title -tech-detect -web-server -ip \
   -follow-redirects -ports 80,443,8080,8443,4444 \
   -rate-limit "${rate_limit_cap_rps:-5}" -timeout 12 -retries 1 \
@@ -99,7 +99,7 @@ cut -d' ' -f1 "$EVID/subs.txt" | sort -u > "$EVID/hosts.txt"
 **CRITICAL — batch httpx hangs on slow hosts.** Empirical (from an early Huella run): a single slow AWS-Elastic-Beanstalk host stalls the entire buffered `-l` batch — both the screenshot run and the plain retry flushed 0 lines before timing out. **Use a per-host loop with a hard 60s timeout each** so one stalled host can't sink the run:
 ```bash
 while read -r h; do
-  timeout 60 /home/kenny/go/bin/httpx -u "$h" -silent -json \
+  timeout 60 $GOPATH/bin/httpx -u "$h" -silent -json \
     -status-code -title -tech-detect -web-server -ip \
     -follow-redirects -ports 80,443,8080,8443,4444 \
     -rate-limit "${rate_limit_cap_rps:-5}" -timeout 12 -retries 1 \
@@ -127,11 +127,11 @@ A non-empty A response = listed. Record `{ip, listed_on[], clean}`. Threat-intel
 ```bash
 # NOTE: theHarvester 4.10.1 rejects `google` and `bing` as "Invalid source" and ABORTS the whole run
 # if either is included. Use only the providers that work on this build. NEVER add linkedin*/companies.
-/home/kenny/.local/bin/theHarvester-h -d <apex> -b duckduckgo,crtsh,certspotter,dnsdumpster -f "$EVID/harvester" >/dev/null 2>&1
+~/.local/bin/theHarvester-h -d <apex> -b duckduckgo,crtsh,certspotter,dnsdumpster -f "$EVID/harvester" >/dev/null 2>&1
 ```
 Optionally supplement with bbot passive email modules (NO LinkedIn):
 ```bash
-/home/kenny/.local/bin/bbot -t <apex> -f email-enum -rf passive -ef active aggressive deadly -y -o "$EVID/bbot" -om json 2>/dev/null
+~/.local/bin/bbot -t <apex> -f email-enum -rf passive -ef active aggressive deadly -y -o "$EVID/bbot" -om json 2>/dev/null
 ```
 Parse emails, dedupe, drop role-noise per `rules.footprint_hunter.email_skip[]`. Provisional severity: corporate (`@<apex>`) = `Media`; generic/role = `Baja`. Record `email_count`.
 **Phones** — regex over harvester output + any homepage bodies fetched in Step 3 (Ecuador `0X-XXX-XXXX`/`+593`, intl `+NN...`). `{phone, source}`. Provisional `Baja` (institutional) / `Media` (if clearly personal-staff).
@@ -152,7 +152,7 @@ Each hit → `{platform, url, source:"footer", confidence:"official", severity:"
 GATED on `social_enum`. Derive candidate handles from the brand: the slug, the apex's leftmost label, and obvious variants (e.g. `examplebrand`, `exbrand`). For each candidate (cap at 3 to bound runtime), run maigret — **anonymous public-URL existence checks only, never LinkedIn**:
 ```bash
 for handle in <candidate_handles>; do
-  timeout 240 /home/kenny/.local/bin/maigret "$handle" \
+  timeout 240 ~/.local/bin/maigret "$handle" \
     --top-sites 300 --timeout 8 --retries 1 --no-recursion --no-extracting \
     --no-progressbar --no-color -J simple -fo "$EVID/maigret" >/dev/null 2>&1
 done
@@ -177,7 +177,7 @@ Pluggable breach lookup. Resolve a provider in this order; use the first that's 
 **Always**: `validity: "DESCONOCIDA"`; redact plaintext to `<first-2>…<last-2>` in JSON (raw to `$EVID`, mode 0600); NEVER attempt login. Provisional severity: account with available plaintext = `Alta` (would be Muy Alta only after authorized validation); account in breach without plaintext = `Media`.
 
 ### 7. Write output
-Path: `/home/kenny/bb-agent/out/<slug>/footprint/<TS>.json`, **mode 0600** (contains PII). Schema:
+Path: `./out/<slug>/footprint/<TS>.json`, **mode 0600** (contains PII). Schema:
 ```json
 {
   "program": "<slug>",

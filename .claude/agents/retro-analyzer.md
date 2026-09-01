@@ -45,17 +45,17 @@ If the first arg is none of: a known slug, the literal `apply`, or the literal `
 ## Steps — analyze mode
 
 ### 1. Validate slug
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing → refuse: `program <slug> not ingested`.
+- Read `./memory/programs/<slug>.json`. If missing → refuse: `program <slug> not ingested`.
 - Note `program.name`, `bounty.tier`, `rules.*` flags.
 
 ### 2. Gather engagement evidence
 For the slug, collect:
-- `/home/kenny/bb-agent/out/<slug>/buckets/*.json` (all timestamps)
-- `/home/kenny/bb-agent/out/<slug>/secrets/*.json` (all timestamps)
-- `/home/kenny/bb-agent/out/<slug>/takeovers/*.json` (all timestamps)
-- `/home/kenny/bb-agent/out/<slug>/reports/*.md` (drafted reports, if any)
-- `/home/kenny/bb-agent/memory/ownership-cache/*.json` filtered by `slug == <slug>`
-- `/home/kenny/bb-agent/memory/submissions/<slug>.json` (may not exist)
+- `./out/<slug>/buckets/*.json` (all timestamps)
+- `./out/<slug>/secrets/*.json` (all timestamps)
+- `./out/<slug>/takeovers/*.json` (all timestamps)
+- `./out/<slug>/reports/*.md` (drafted reports, if any)
+- `./memory/ownership-cache/*.json` filtered by `slug == <slug>`
+- `./memory/submissions/<slug>.json` (may not exist)
 
 Compute aggregate metrics:
 - bucket candidates total / verified-owned / unowned / unknown
@@ -136,7 +136,7 @@ Compose 2-5 paragraphs for `memory/lessons.md` covering:
 The narrative is for humans + the LLM in next session's context window. Do not duplicate machine-readable rule content here.
 
 ### 5. Write the proposal
-Path: `/home/kenny/bb-agent/memory/lessons/proposals/<UTC-YYYYMMDD-HHMMSS>-<slug>.json`
+Path: `./memory/lessons/proposals/<UTC-YYYYMMDD-HHMMSS>-<slug>.json`
 
 Schema:
 ```json
@@ -145,9 +145,9 @@ Schema:
   "slug": "<slug>",
   "generated_at": "<UTC ISO8601>",
   "evidence_inputs": [
-    "/home/kenny/bb-agent/out/<slug>/buckets/<ts>.json",
-    "/home/kenny/bb-agent/out/<slug>/secrets/<ts>.json",
-    "/home/kenny/bb-agent/memory/ownership-cache/<key>.json",
+    "./out/<slug>/buckets/<ts>.json",
+    "./out/<slug>/secrets/<ts>.json",
+    "./memory/ownership-cache/<key>.json",
     "..."
   ],
   "metrics": {
@@ -222,7 +222,7 @@ Relay the proposal path, each rule id + 1-line rationale, and the exact `/retro 
 ## Steps — apply mode
 
 ### 1. Locate the proposal
-- Path: `/home/kenny/bb-agent/memory/lessons/proposals/<proposal-id>.json`
+- Path: `./memory/lessons/proposals/<proposal-id>.json`
 - If missing → refuse: `proposal <id> not found.`
 
 ### 2. Filter rules
@@ -232,7 +232,7 @@ Relay the proposal path, each rule id + 1-line rationale, and the exact `/retro 
 
 ### 3. Apply each rule
 For each rule to apply:
-- Load `/home/kenny/bb-agent/memory/rules.json`.
+- Load `./memory/rules.json`.
 - Navigate to `rules[agent][path]`.
 - If `action == "append"`:
   - Refuse if any existing entry has the same `rule_id` (already applied).

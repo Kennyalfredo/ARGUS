@@ -30,7 +30,7 @@ Discover subdomains under in-scope wildcards/domains that have a CNAME pointing 
 ## Steps
 
 ### 0. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer for the shape). Extract `rules.takeover_hunter` (may be empty in v1). Apply at these points later in the pipeline:
+Read `./memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer for the shape). Extract `rules.takeover_hunter` (may be empty in v1). Apply at these points later in the pipeline:
 - `fingerprint_engine_ignore[]` — drop any subzy hit whose `engine` matches before Step 6 candidate build (e.g. retire known-FP fingerprints).
 - `subdomain_skip[]` — drop any enumerated subdomain whose name matches a literal/regex before Step 4 dnsx (e.g. internal staging suffixes that always look dangling but aren't).
 - `subzy_concurrency_override` (int|null) — passes through as `--concurrency=` instead of the default 20.
@@ -41,9 +41,9 @@ Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default sk
 Record any rule firings in the output's `summary.notes` as `"applied rule <rule_id>: <one-line reason>"`.
 
 ### 1. Validate inputs
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing → stop: `takeover-hunter: program <slug> not ingested — run /program-load first.`
+- Read `./memory/programs/<slug>.json`. If missing → stop: `takeover-hunter: program <slug> not ingested — run /program-load first.`
 - Read `rules.automated_tools_allowed` and `rules.mass_scanning_allowed`. `automated_tools_allowed=false` → strict tier (active-probe cap 150, per-seed enum cap 150, seed cap 12); otherwise default tier (500 / 500 / 25). Apply any `*_cap_override` rules from Step 0 on top. See the cap model in Hard rules.
-- Confirm tool paths: `/home/kenny/go/bin/subfinder`, `/home/kenny/go/bin/dnsx`, `/home/kenny/go/bin/subzy`. If any missing, stop with the exact missing-path error.
+- Confirm tool paths: `$GOPATH/bin/subfinder`, `$GOPATH/bin/dnsx`, `$GOPATH/bin/subzy`. If any missing, stop with the exact missing-path error.
 
 ### 2. Derive seed domains from in-scope wildcards/domains
 From `scope.in_scope[*]` where `type` ∈ {`wildcard`, `domain`}:
@@ -57,7 +57,7 @@ Cap seed domains at the seed cap (default 25 / strict 12, or `seed_cap_override`
 
 ### 3. Pre-flight
 ```bash
-mkdir -p "/home/kenny/bb-agent/out/<slug>/takeovers"
+mkdir -p "./out/<slug>/takeovers"
 EVID="/tmp/takeover-hunter-<slug>-<UTC-YYYYMMDD-HHMMSS>"
 mkdir -p "$EVID"
 ```
@@ -68,7 +68,7 @@ Run **all three** sources in parallel for each seed and merge. Each catches subd
 
 **4.1 Subfinder** (existing — primary source, broadest coverage):
 ```bash
-/home/kenny/go/bin/subfinder \
+$GOPATH/bin/subfinder \
   -d "<seed>" \
   -all \
   -silent \
@@ -79,7 +79,7 @@ Run **all three** sources in parallel for each seed and merge. Each catches subd
 
 **4.2 Amass passive** (NEW):
 ```bash
-/home/kenny/.local/bin/amass enum \
+~/.local/bin/amass enum \
   -passive \
   -d "<seed>" \
   -silent \
@@ -95,7 +95,7 @@ curl -s --max-time 30 "https://crt.sh/?q=%25.<seed>&output=json" \
   -o "$EVID/crtsh-<seed>.json" 2> "$EVID/crtsh-<seed>.err"
 
 # Extract unique subdomains (handle wildcard certs and multi-SAN entries):
-/home/kenny/.local/bin/jq -r '.[]?.name_value' "$EVID/crtsh-<seed>.json" \
+~/.local/bin/jq -r '.[]?.name_value' "$EVID/crtsh-<seed>.json" \
   | tr ',' '\n' | tr -d ' ' | sed 's/^\*\.//' \
   | grep -E "\.<seed>$" | sort -u > "$EVID/crtsh-<seed>.txt"
 ```
@@ -116,7 +116,7 @@ Apply any `rules.takeover_hunter.subdomain_skip[]` filters now — drop matching
 Resolve each subdomain and emit only those with a non-empty CNAME chain (those are the only takeover-relevant candidates — an A-record-only host can't be taken over via CNAME-pointing-to-unclaimed-service):
 
 ```bash
-/home/kenny/go/bin/dnsx \
+$GOPATH/bin/dnsx \
   -cname \
   -resp \
   -silent \
@@ -129,7 +129,7 @@ Resolve each subdomain and emit only those with a non-empty CNAME chain (those a
   2> "$EVID/dnsx.err"
 ```
 
-**Why stdin redirect instead of `-l <file>`:** the `/home/kenny/go/bin/dnsx` build from May 2026 hangs indefinitely on `-l <file>` (sleeping process, 0 bytes written, no active sockets) but works instantly when the same list is piped via stdin. Cause unknown (possibly a buffering/blocking-IO regression in the dnsx file-reader path on this specific binary). The stdin form is reliable. Explicit `-r` resolvers and `-retry 1 -t 50` are added for hygiene — don't depend on the system resolver under strict-mode timing budgets.
+**Why stdin redirect instead of `-l <file>`:** the `$GOPATH/bin/dnsx` build from May 2026 hangs indefinitely on `-l <file>` (sleeping process, 0 bytes written, no active sockets) but works instantly when the same list is piped via stdin. Cause unknown (possibly a buffering/blocking-IO regression in the dnsx file-reader path on this specific binary). The stdin form is reliable. Explicit `-r` resolvers and `-retry 1 -t 50` are added for hygiene — don't depend on the system resolver under strict-mode timing budgets.
 
 Parse `dnsx.jsonl`. For each entry where `cname` array has at least one entry, write the `host` to `$EVID/subdomains-with-cname.txt`. Keep a map `host → cname[]` for use in Step 6.
 
@@ -140,7 +140,7 @@ If `subdomains-with-cname.txt` is empty, write an empty-candidates output file a
 ### 6. Subzy — fingerprint match
 Run once:
 ```bash
-/home/kenny/go/bin/subzy run \
+$GOPATH/bin/subzy run \
   --targets "$EVID/subdomains-with-cname.txt" \
   --output "$EVID/subzy.json" \
   --vuln \
@@ -219,9 +219,9 @@ If either gate fails, log `"nuclei takeover pass skipped: <reason>"` in `summary
 **Why a second engine:** Nuclei's `http/takeovers/*.yaml` templates use a different fingerprint database than subzy's `can-i-take-over-xyz` corpus. Some takeover classes exist in one but not the other (Microsoft Azure variants, Vercel, Smugmug, certain HubSpot configurations). Running both engines + the body-recheck gate raises the catch rate without raising the FP rate (since each candidate still has to pass body recheck).
 
 ```bash
-/home/kenny/go/bin/nuclei \
+$GOPATH/bin/nuclei \
   -list "$EVID/subdomains-with-cname.txt" \
-  -t /home/kenny/nuclei-templates/http/takeovers/ \
+  -t ~/nuclei-templates/http/takeovers/ \
   -silent \
   -json-export "$EVID/nuclei-takeovers.json" \
   -rate-limit "${rate_limit_cap_rps:-5}" \
@@ -302,7 +302,7 @@ For each surviving subzy hit **that also passed the Step 6.5 body recheck (`body
 Sort candidates by `fingerprint_engine` (alphabetical) then `subdomain`.
 
 ### 8. Write output
-Output path: `/home/kenny/bb-agent/out/<slug>/takeovers/<UTC-YYYYMMDD-HHMMSS>.json`
+Output path: `./out/<slug>/takeovers/<UTC-YYYYMMDD-HHMMSS>.json`
 
 Schema:
 ```json

@@ -23,14 +23,14 @@ Enumerate publicly-discoverable cloud buckets that share a name root with the pr
 ## Steps
 
 ### 0. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer agent for the shape). Extract `rules.bucket_hunter`. Apply at these points later in the pipeline:
+Read `./memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer agent for the shape). Extract `rules.bucket_hunter`. Apply at these points later in the pipeline:
 - `basename_skip[]` — drop any derived `base_name` whose `pattern` matches before Step 2's candidate generation.
 - `candidate_suffix_skip[]` — drop any generated candidate whose suffix matches before Step 3's `s3scanner` call.
 - `s3scanner_acl_recheck_required[0]` (object) — if `enabled=true`, run Step 4.5 (post-scan anonymous list-objects-v2 recheck) on every s3scanner-flagged candidate. Use the rule's `recheck_command` template with `{bucket_name}` substitution. If `disqualify_if_access_denied=true`, the recheck overrides s3scanner's ACL claim and writes the authoritative result to the candidate's `acl_recheck` field.
 Record any rule firings in the output's `summary.notes` as `"applied rule <rule_id>: <one-line reason>"` so the next retro can audit which rules actually fired.
 
 ### 1. Validate inputs
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing, stop and tell the user to run `/program-load` first.
+- Read `./memory/programs/<slug>.json`. If missing, stop and tell the user to run `/program-load` first.
 - Read `rules.bucket_listing_allowed`. If `false`, stop. Print: `bucket-hunter: bucket listing not allowed for <slug> — aborting.`
 - Read `rules.mass_scanning_allowed` for later candidate-cap logic.
 
@@ -81,7 +81,7 @@ Write the candidate list to `/tmp/bucket-hunter-<slug>-candidates.txt`, one per 
 ### 4. Pass A scan — s3scanner
 Run **once**:
 ```bash
-/home/kenny/go/bin/s3scanner -bucket-file /tmp/bucket-hunter-<slug>-candidates.txt -enumerate -json -threads 4 > /tmp/bucket-hunter-<slug>-passA.jsonl 2> /tmp/bucket-hunter-<slug>-passA.err
+$GOPATH/bin/s3scanner -bucket-file /tmp/bucket-hunter-<slug>-candidates.txt -enumerate -json -threads 4 > /tmp/bucket-hunter-<slug>-passA.jsonl 2> /tmp/bucket-hunter-<slug>-passA.err
 ```
 Parse the JSONL. A "hit" = any bucket where the entry indicates `exists=true` (s3scanner uses the field `bucket_exists` or similar — inspect the first lines of output to confirm the actual key names and adapt your parsing). Capture: bucket name, region, ACL flags (auth_users / all_users / list / read / write), and any object-count summary s3scanner emits.
 
@@ -92,7 +92,7 @@ s3scanner's `perm_all_users_read=ALLOWED` / `auth_users_read=true` reports the *
 For every candidate from Step 4 that s3scanner flagged as `bucket_exists=true`, run the anonymous list-objects-v2 recheck **once**:
 
 ```bash
-/home/kenny/.local/bin/aws s3api list-objects-v2 \
+~/.local/bin/aws s3api list-objects-v2 \
   --no-sign-request \
   --bucket "<name>" \
   --max-items 1 \
@@ -124,7 +124,7 @@ If both passes return zero, write an empty candidates array but still produce th
 
 ### 6. Write output
 
-Output path: `/home/kenny/bb-agent/out/<slug>/buckets/<UTC-YYYYMMDD-HHMMSS>.json`
+Output path: `./out/<slug>/buckets/<UTC-YYYYMMDD-HHMMSS>.json`
 (create parent dirs with `mkdir -p`.)
 
 Schema:

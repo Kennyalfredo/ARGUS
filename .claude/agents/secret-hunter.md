@@ -29,14 +29,14 @@ Find publicly-exposed credentials that *may* belong to the program. Output a red
 ## Steps
 
 ### 0. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer for the shape). Extract `rules.secret_hunter`. Apply at these points:
+Read `./memory/rules.json` (create with the schema-default skeleton if missing — see retro-analyzer for the shape). Extract `rules.secret_hunter`. Apply at these points:
 - `detector_ignore[]` — when parsing trufflehog/noseyparker output in Step 7, drop any candidate where `detector == rule.detector` AND the candidate's raw value (reconstructable from the un-redacted scanner output on `/mnt/files/...`) exactly matches one of the case-sensitive strings in `rule.match_in[]`. No regex, no fuzzy match in v1. Apply BEFORE deduplication so the dropped count is accurate.
 - `skip_brand_stem_orgs` (bool) — if true and the slug equals exactly one of the derived `gh_org_candidates`, skip Pass A for that org and rely on Pass B + C only.
 - `trufflehog_concurrency_override` (int|null) — if set, pass through as `--concurrency=` instead of the default `4`.
 Record rule firings in `summary.notes` as `"applied rule <rule_id>: <one-line reason>"` so the next retro can audit which rules fired.
 
 ### 1. Validate inputs
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing, stop: `secret-hunter: program <slug> not ingested — run /program-load first.`
+- Read `./memory/programs/<slug>.json`. If missing, stop: `secret-hunter: program <slug> not ingested — run /program-load first.`
 - Read `rules.automated_tools_allowed` and `rules.mass_scanning_allowed`. Both `false` → apply the strict caps in rule 6. Otherwise use the default caps below.
 - Read `rules.bucket_listing_allowed` — not directly relevant here, but if it's `false` it means the program is *very* restrictive; tighten the GH code-search cap further to 2 base names and warn the user in the summary.
 
@@ -74,7 +74,7 @@ Also derive `gh_org_candidates`:
 mkdir -p "/mnt/files/bb-agent/<slug>/secrets/clones"
 mkdir -p "/mnt/files/bb-agent/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>"   # raw evidence dir for this run
 chmod 700 "/mnt/files/bb-agent/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>"
-mkdir -p "/home/kenny/bb-agent/out/<slug>/secrets"
+mkdir -p "./out/<slug>/secrets"
 ```
 
 Let `EVID="/mnt/files/bb-agent/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>"` for the rest of the run.
@@ -82,9 +82,9 @@ Let `EVID="/mnt/files/bb-agent/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>"` for the re
 ### 4. Pass A — trufflehog org scan
 For each `gh_org_candidate`, run **once**:
 ```bash
-/home/kenny/go/bin/trufflehog github \
+$GOPATH/bin/trufflehog github \
   --org="<org>" \
-  --token="$(/home/kenny/.local/bin/gh auth token)" \
+  --token="$(~/.local/bin/gh auth token)" \
   --results=verified \
   --json \
   --concurrency=4 \
@@ -135,7 +135,7 @@ Rationale for each Tier 2 dork:
 
 For each dork, run **exactly one** code-search call:
 ```bash
-/home/kenny/.local/bin/gh api -X GET search/code \
+~/.local/bin/gh api -X GET search/code \
   -f q='<dork query>' \
   -H "Accept: application/vnd.github+json" \
   --jq '[.items[] | {repo: .repository.full_name, path: .path, html_url: .html_url, score: .score}] | .[0:30]' \
@@ -160,7 +160,7 @@ git clone --depth=1 "https://github.com/<owner>/<name>.git" \
   "/mnt/files/bb-agent/<slug>/secrets/clones/<owner>__<name>" \
   > "$EVID/clone-<owner>__<name>.log" 2>&1 || { echo "clone failed: <owner>/<name>" >> "$EVID/clone-failures.log"; continue; }
 
-/home/kenny/go/bin/trufflehog filesystem \
+$GOPATH/bin/trufflehog filesystem \
   "/mnt/files/bb-agent/<slug>/secrets/clones/<owner>__<name>" \
   --results=verified --json \
   > "$EVID/trufflehog-passB-<owner>__<name>.jsonl" \
@@ -174,7 +174,7 @@ Refuse to clone any repo > 500 MB. Pre-check with `gh api repos/<owner>/<name> -
 For each successfully-cloned Pass B repo, run gitleaks as a second-ruleset filesystem pass on the same clone. gitleaks catches credential classes trufflehog skips (RSA PEM in non-standard headers, base64-encoded JWT-shaped tokens, custom regex patterns for cloud SDKs, JDBC connection strings with embedded passwords).
 
 ```bash
-/home/kenny/go/bin/gitleaks detect \
+$GOPATH/bin/gitleaks detect \
   --source="/mnt/files/bb-agent/<slug>/secrets/clones/<owner>__<name>" \
   --report-format=json \
   --report-path="$EVID/gitleaks-passB-<owner>__<name>.json" \
@@ -199,12 +199,12 @@ For each successfully-cloned repo in Pass B, re-fetch full history once and run 
 git -C "/mnt/files/bb-agent/<slug>/secrets/clones/<owner>__<name>" fetch --unshallow \
   > "$EVID/unshallow-<owner>__<name>.log" 2>&1 || true
 
-/home/kenny/go/bin/noseyparker scan \
+$GOPATH/bin/noseyparker scan \
   --datastore "$EVID/np-datastore" \
   "/mnt/files/bb-agent/<slug>/secrets/clones/<owner>__<name>" \
   > "$EVID/noseyparker-passC-<owner>__<name>.log" 2>&1
 
-/home/kenny/go/bin/noseyparker report \
+$GOPATH/bin/noseyparker report \
   --datastore "$EVID/np-datastore" \
   --format json \
   --output "$EVID/noseyparker-passC-report.json" \
@@ -245,7 +245,7 @@ Dedupe across passes by `(file, line, raw_hash)` first (catches trufflehog+gitle
 
 ### 8. Write output
 
-Output path: `/home/kenny/bb-agent/out/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>.json`
+Output path: `./out/<slug>/secrets/<UTC-YYYYMMDD-HHMMSS>.json`
 
 Schema:
 ```json
@@ -321,7 +321,7 @@ Reply with:
 - Don't run gitleaks with the default `--no-git=false` (git-history mode) on Pass B clones — they're shallow (--depth=1) and a history scan would either fail or duplicate Pass C's noseyparker historical work. Use `--no-git` to scan filesystem only.
 - Don't collapse the dork set back to one broad query. The dorks exist because org-name-mismatch FN (canonical GH org name ≠ brand stem) is real and dorks surface canonical owners that a single `"<base>" in:file` query misses.
 - Don't widen scope by scanning random GH orgs that share part of the slug. Only the orgs you derived in step 2.
-- Don't write any secret value to a file under `/home/kenny/bb-agent/out/`. Redact first. Raw evidence stays on `/mnt/files/...` with `0600`.
+- Don't write any secret value to a file under `./out/`. Redact first. Raw evidence stays on `/mnt/files/...` with `0600`.
 - Don't call ownership-verifier yourself — same decoupling principle as bucket-hunter.
 - Don't draft a report. That's the `report-drafter` agent (Day 5).
 - Don't add fields outside the output schema. Use `summary.notes` (a string) for oddities.

@@ -33,7 +33,7 @@ Find publicly-exposed sensitive endpoints and files under in-scope wildcards/dom
 ## Steps
 
 ### 0. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default skeleton if missing). Extract `rules.endpoint_hunter` (likely empty in v1 — this is a new agent). Also read `rules.program_scope_parser` for the `explicit_scanner_ban` / `rate_limit_cap_rps` flags that the parser may have set on the program JSON. Apply at these points:
+Read `./memory/rules.json` (create with the schema-default skeleton if missing). Extract `rules.endpoint_hunter` (likely empty in v1 — this is a new agent). Also read `rules.program_scope_parser` for the `explicit_scanner_ban` / `rate_limit_cap_rps` flags that the parser may have set on the program JSON. Apply at these points:
 
 - `path_glob_skip[]` — drop any sensitive-path candidate matching a literal/regex (e.g. known-FP paths like `/.well-known/security.txt` that look sensitive but aren't)
 - `body_signature_skip[]` — drop any body-signature-matched candidate where the body matches a documented FP pattern (e.g. WAF challenge pages that masquerade as `/.env` files)
@@ -43,14 +43,14 @@ Read `/home/kenny/bb-agent/memory/rules.json` (create with the schema-default sk
 Record any rule firings in `summary.notes` as `"applied rule <rule_id>: <one-line reason>"`.
 
 ### 1. Validate inputs + COMPLIANCE GATES
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`. If missing → stop: `endpoint-hunter: program <slug> not ingested — run /program-load first.`
+- Read `./memory/programs/<slug>.json`. If missing → stop: `endpoint-hunter: program <slug> not ingested — run /program-load first.`
 - Check `rules.explicit_scanner_ban`. If `true`:
   - Write an empty-candidates output file at `out/<slug>/endpoints/<UTC-ts>.json` with `summary.refused_reason: "explicit_scanner_ban=true"`.
   - Report back with the refusal explanation and stop. NEVER proceed to any subsequent step.
 - Check `rules.automated_tools_allowed`. If `false`:
   - Set `passive_only_mode = true`. Steps 4-5 will run; Steps 6-8 (live probe + body fetch + nuclei) will be skipped. Output will still contain the grep-derived candidate list, marked with `live_status: "unprobed"`.
 - Read `rules.rate_limit_cap_rps`. If unset, default to 5 req/sec. If set, use that value verbatim as the cap for httpx and nuclei.
-- Confirm tool paths: `/home/kenny/go/bin/gau`, `/home/kenny/.local/bin/waymore` (optional — if absent, log and run gau-only), `/home/kenny/go/bin/httpx` (only if active mode), `/home/kenny/go/bin/nuclei` (only if active mode). If a *required* tool (gau) is missing, stop with the exact missing-path error.
+- Confirm tool paths: `$GOPATH/bin/gau`, `~/.local/bin/waymore` (optional — if absent, log and run gau-only), `$GOPATH/bin/httpx` (only if active mode), `$GOPATH/bin/nuclei` (only if active mode). If a *required* tool (gau) is missing, stop with the exact missing-path error.
 
 ### 2. Derive seed domains from in-scope wildcards/domains
 Same logic as takeover-hunter Step 2:
@@ -64,7 +64,7 @@ Also record the original `scope.in_scope[]` entries so Step 9 can attach `in_sco
 
 ### 3. Pre-flight
 ```bash
-mkdir -p "/home/kenny/bb-agent/out/<slug>/endpoints"
+mkdir -p "./out/<slug>/endpoints"
 mkdir -p "/mnt/files/bb-agent/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>"
 chmod 700 "/mnt/files/bb-agent/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>"
 EVID="/mnt/files/bb-agent/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>"
@@ -77,7 +77,7 @@ EVID="/mnt/files/bb-agent/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>"
 For each seed domain (one call per seed, serialized):
 
 ```bash
-/home/kenny/go/bin/gau \
+$GOPATH/bin/gau \
   --providers wayback,commoncrawl,otx,urlscan \
   --threads 4 \
   --timeout 60 \
@@ -100,7 +100,7 @@ url_count=$(wc -l < "$EVID/gau-<seed>.txt")
 if [ "$url_count" -lt 50 ]; then
   echo "WARNING: <seed> returned only $url_count URLs — retrying after 30s in case of provider throttle" >> "$EVID/gau-retry.log"
   sleep 30
-  /home/kenny/go/bin/gau \
+  $GOPATH/bin/gau \
     --providers wayback,commoncrawl,otx,urlscan \
     --threads 4 \
     --timeout 120 \
@@ -121,7 +121,7 @@ If the retry still returns 0 URLs for a high-value seed (one that contains the p
 
 #### 4b. Complementary enumeration via waymore (`-mode U`) — widen archive coverage
 
-After gau completes for a seed, run `waymore` on the same seed as a complementary source, then merge+dedupe. waymore reaches deeper into Wayback pagination and adds VirusTotal/IntelX providers (key-gated), so it routinely surfaces archived URLs gau misses. If `/home/kenny/.local/bin/waymore` is absent, skip this sub-step and proceed gau-only (log `"waymore not installed — gau-only coverage"` in `summary.notes`).
+After gau completes for a seed, run `waymore` on the same seed as a complementary source, then merge+dedupe. waymore reaches deeper into Wayback pagination and adds VirusTotal/IntelX providers (key-gated), so it routinely surfaces archived URLs gau misses. If `~/.local/bin/waymore` is absent, skip this sub-step and proceed gau-only (log `"waymore not installed — gau-only coverage"` in `summary.notes`).
 
 **Run SERIALLY per seed (same throttle discipline as gau)** — waymore hits the same archive APIs, so a burst gets the same silent-throttle treatment:
 
@@ -130,7 +130,7 @@ After gau completes for a seed, run `waymore` on the same seed as a complementar
 # BOUNDING FLAGS ARE MANDATORY: unbounded waymore hangs for many minutes because CommonCrawl
 # scans every index collection. Always cap: -lcc (CC collections), -t (per-request timeout),
 # -p (processes), -r (retries). Wrap in `timeout` as a hard backstop.
-timeout 300 /home/kenny/.local/bin/waymore \
+timeout 300 ~/.local/bin/waymore \
   -i "<seed>" \
   -mode U \
   -f \
@@ -234,7 +234,7 @@ If `passive_only_mode == true`, skip this step and proceed to Step 9 with all se
 Otherwise:
 
 ```bash
-/home/kenny/go/bin/httpx \
+$GOPATH/bin/httpx \
   -l "$EVID/sensitive-candidates.txt" \
   -silent \
   -json \
@@ -318,10 +318,10 @@ live_count=$(wc -l < "$EVID/live-urls.txt")
 if [ "$live_count" -eq 0 ]; then
   echo "nuclei step skipped: no 200 OK URLs to test" >> "$EVID/nuclei-exposures.log"
 else
-  /home/kenny/go/bin/nuclei \
+  $GOPATH/bin/nuclei \
     -list "$EVID/live-urls.txt" \
-    -t /home/kenny/nuclei-templates/http/exposures/ \
-    -t /home/kenny/nuclei-templates/http/misconfiguration/ \
+    -t ~/nuclei-templates/http/exposures/ \
+    -t ~/nuclei-templates/http/misconfiguration/ \
     -severity critical,high \
     -silent \
     -json-export "$EVID/nuclei-exposures.json" \
@@ -390,7 +390,7 @@ Sort candidates by `confidence` desc (high > medium > low), then by `engines` co
 
 ### 10. Write output
 
-Output path: `/home/kenny/bb-agent/out/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>.json`
+Output path: `./out/<slug>/endpoints/<UTC-YYYYMMDD-HHMMSS>.json`
 
 Schema:
 ```json

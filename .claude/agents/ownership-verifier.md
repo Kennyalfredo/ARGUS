@@ -29,7 +29,7 @@ Two positional arguments:
 ## Steps
 
 ### -1. Load learned rules
-Read `/home/kenny/bb-agent/memory/rules.json` (create with schema defaults if missing). Extract `rules.ownership_verifier`. Apply at these points:
+Read `./memory/rules.json` (create with schema defaults if missing). Extract `rules.ownership_verifier`. Apply at these points:
 - `wayback_match_mode` (`"substring"` default, or `"word_boundary"`) — switches the Step 4 grep from `grep -F "<asset>"` to `grep -E "\b<asset>\b"` when set to `word_boundary`. Use this to defang the brand-stem degenerate-match case.
 - `min_positive_signals` (default 2) — minimum positive checks required for `owned` verdict in Step 6's aggregation. Do NOT lower below 2 in v1; rules.json schema treats 1 as an error.
 - `asset_pattern_overrides[]` — per-pattern overrides (e.g. force a specific asset to skip check B). Apply only if the asset matches `rule.pattern` (literal string or regex per the rule's `match_type`).
@@ -39,11 +39,11 @@ Record rule firings in the cache file's `notes` field as `"applied rule <rule_id
 
 ### 0. Cache check
 - Compute `key = sha1("<slug>:<asset>")` (first 16 hex chars is enough).
-- Path: `/home/kenny/bb-agent/memory/ownership-cache/<key>.json`
+- Path: `./memory/ownership-cache/<key>.json`
 - If exists AND `fetched_at` is within 30 days of today → return the cached verdict verbatim. Print a `cache_hit: true` line.
 
 ### 1. Load program context
-- Read `/home/kenny/bb-agent/memory/programs/<slug>.json`.
+- Read `./memory/programs/<slug>.json`.
 - Extract:
   - in-scope domains (strip leading `*.`)
   - the org's likely GitHub org name(s) — derive heuristically from the program name; if the program JSON lists none, fall back to the slug. **If the slug starts with a platform prefix (`bc-` for Bugcrowd, `int-` for Intigriti), strip it before using as a GH-org guess** — the GitHub org is `t-mobile` (not `bc-t-mobile`) and `aikido` (not `int-aikido`). The full prefixed slug is still used for cache keys, ownership-cache filenames, and program-JSON lookup; the strip is GH-search-only. The strip list (`{"bc-", "int-"}`) is the canonical place to extend when adding new platforms.
@@ -65,7 +65,7 @@ For `gh_account` assets, the standard Check A still runs (GH code search for the
 Search public GitHub for references to the asset string. Use `gh api`:
 
 ```bash
-/home/kenny/.local/bin/gh api -X GET search/code \
+~/.local/bin/gh api -X GET search/code \
   -f q='"<asset>" in:file' \
   -H "Accept: application/vnd.github+json" \
   --jq '{total_count, items: [.items[] | {repo: .repository.full_name, path: .path, html_url: .html_url}] | .[0:10]}' \
@@ -87,7 +87,7 @@ Interpretation:
 
 **Employee cache check (per-program, 90-day TTL):**
 
-Path: `/home/kenny/bb-agent/memory/employee-cache/<slug>.json`
+Path: `./memory/employee-cache/<slug>.json`
 
 If file exists AND `fetched_at` is within 90 days of today → use the cached employee list. Skip the theHarvester call. Record `employee_cache_hit: true` in the verdict notes.
 
@@ -98,7 +98,7 @@ If file is missing OR stale:
 2. **Run theHarvester (passive providers ONLY, no LinkedIn, no API-key-required providers):**
 
    ```bash
-   /home/kenny/.local/bin/theHarvester-h \
+   ~/.local/bin/theHarvester-h \
      -d "<primary_domain>" \
      -b brave,commoncrawl,crtsh,certspotter,dnsdumpster,duckduckgo,hackertarget,mojeek,otx,rapiddns \
      -l 500 \
@@ -125,7 +125,7 @@ If file is missing OR stale:
 
 4. **Write employee cache:**
 
-   Path: `/home/kenny/bb-agent/memory/employee-cache/<slug>.json` (create the `employee-cache/` directory on first use, mode 0700 since it contains harvested employee emails).
+   Path: `./memory/employee-cache/<slug>.json` (create the `employee-cache/` directory on first use, mode 0700 since it contains harvested employee emails).
 
    ```json
    {
@@ -147,7 +147,7 @@ If file is missing OR stale:
 1. Fetch the candidate GH account's public profile (one `gh api` call, counts against the standard `gh` rate budget):
 
    ```bash
-   /home/kenny/.local/bin/gh api "users/<asset>" \
+   ~/.local/bin/gh api "users/<asset>" \
      --jq '{login, name, email, company, bio, location, blog, twitter_username, html_url}' \
      > "/tmp/ownership-<key>-gh-profile.json" 2>&1
    ```
@@ -186,7 +186,7 @@ Run `gau` against the program's primary in-scope domains and grep for the asset 
 
 ```bash
 # Pick at most 3 representative in-scope domains. Strip the leading *. .
-echo -e "<dom1>\n<dom2>\n<dom3>" | /home/kenny/go/bin/gau --threads 3 --providers wayback,otx \
+echo -e "<dom1>\n<dom2>\n<dom3>" | $GOPATH/bin/gau --threads 3 --providers wayback,otx \
   > /tmp/ownership-<key>-gau.txt 2> /tmp/ownership-<key>-gau.err
 
 grep -F "<asset>" /tmp/ownership-<key>-gau.txt > /tmp/ownership-<key>-gau-hits.txt || true
@@ -202,13 +202,13 @@ Only meaningful for S3-style buckets and subdomains. For an IP, skip and mark **
 
 For a bucket name `<x>`:
 ```bash
-/home/kenny/go/bin/dnsx -d <x>.s3.amazonaws.com -cname -resp -silent > /tmp/ownership-<key>-dns.txt 2> /tmp/ownership-<key>-dns.err
+$GOPATH/bin/dnsx -d <x>.s3.amazonaws.com -cname -resp -silent > /tmp/ownership-<key>-dns.txt 2> /tmp/ownership-<key>-dns.err
 dig +short <x>.s3.amazonaws.com >> /tmp/ownership-<key>-dns.txt 2>>/tmp/ownership-<key>-dns.err
 ```
 
 For a subdomain `<sub>.<programdomain>`:
 ```bash
-/home/kenny/go/bin/dnsx -d <sub>.<programdomain> -cname -a -resp -silent > /tmp/ownership-<key>-dns.txt
+$GOPATH/bin/dnsx -d <sub>.<programdomain> -cname -a -resp -silent > /tmp/ownership-<key>-dns.txt
 ```
 
 Interpretation:
@@ -286,7 +286,7 @@ For `gh_account` assets, Check A.5 (Phase 3) influences Check A first per Step 3
 Rationale: require **two independent positive signals** for `owned`. `ambiguous` and `inconclusive` count as neither pos nor neg — they cannot make a verdict but they don't downgrade one either. The Phase 3 A.5 enhancement specifically targets the case where a GH account candidate has no program-org-membership signal but does have an out-of-band employee-attribution signal — it raises Check A's signal quality without bypassing the 2-of-3 requirement.
 
 ### 7. Write cache file
-Path: `/home/kenny/bb-agent/memory/ownership-cache/<key>.json`
+Path: `./memory/ownership-cache/<key>.json`
 
 ```json
 {

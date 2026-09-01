@@ -17,7 +17,7 @@ Delegate this to the `program-scope-parser` subagent. Pass the URL and instruct 
 1. Validate the URL (must be hackerone.com, bugcrowd.com, or intigriti.com).
 2. Fetch the policy/scope page(s). For Bugcrowd and Intigriti, the structured scope/bounty data is reliably in the arkadiyt/bounty-targets-data dump — parser pulls from there (same source program-scout uses). No program-owned asset fetch.
 3. Produce a JSON conforming to its declared schema, with `program.slug` set to the prefixed form for Bugcrowd / Intigriti.
-4. Write it to `/home/kenny/bb-agent/memory/programs/<slug>.json`.
+4. Write it to `./memory/programs/<slug>.json`.
 
 When the subagent returns, give the user a tight summary:
 - slug (with platform prefix if applicable) + file path + platform
