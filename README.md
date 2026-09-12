@@ -1,4 +1,4 @@
-# BEAR-AGENT
+# ARGUS
 
 **Autonomous offensive security platform — from recon to report.**
 
